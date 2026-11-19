@@ -45,6 +45,10 @@
 
 Оба виджета добавляются в настройках: **Widgets → Add a Widget**.
 
+Мой конфиг Hyprland (Lua) — в [`hypr/`](hypr): `hyprland.lua` (мониторы, воркспейсы по мониторам, анимации,
+бинды на ALT, жесты, автозапуск) и `macshell.lua`, который он подключает через `require("macshell")`.
+Кладутся в `~/.config/hypr/`. Мониторы (`DP-1`, `HDMI-A-1`, `eDP-1`) и звуковую карту в автозапуске поправь под себя.
+
 <p align="center">
   <a href="#screenshots">Screenshots</a> ·
   <a href="#requirements">Requirements</a> ·
