@@ -5760,7 +5760,8 @@ Scope {
                         scale: root.barWidgetScale
                         Repeater {
                             model: root.menuTitles.filter(function (item) {
-                                return item.id === "apple" ? root.barWidgetEnabled("appleMenu") : root.barWidgetEnabled("appMenus");
+                                // [local] имя активного приложения показываем всегда, «Файл / Правка / …» — только с appMenus
+                                return item.id === "apple" ? root.barWidgetEnabled("appleMenu") : (item.id === "app" || root.barWidgetEnabled("appMenus"));
                             })
                             delegate: Item {
                                 id: mt
@@ -5818,8 +5819,8 @@ Scope {
                                     anchors.centerIn: parent
                                     text: I18n.tr(mt.modelData.label)
                                     color: bpal.fg
-                                    font.family: mt.activeApp ? Fonts.forWeight((mt.activeApp ? Font.DemiBold : Font.Normal), root.boldFontFamily)
-                                                              : Fonts.forWeight((mt.activeApp ? Font.DemiBold : Font.Normal), "Open Runde")
+                                    // [local] шрифт из настроек (fontFamily), а не жёстко Open Runde
+                                    font.family: root.fontForWeight((mt.activeApp ? Font.DemiBold : Font.Normal), bpal.fam)
                                     font.pixelSize: 14
                                     font.weight: mt.activeApp ? Font.DemiBold : Font.Normal
                                 }
@@ -5837,16 +5838,32 @@ Scope {
                     Row {
                         id: wsRow
                         visible: root.barWidgetEnabled("workspaces")
-                        anchors.horizontalCenter: parent.horizontalCenter
+                        // [local] слева после имени приложения (было по центру — там теперь часы)
+                        anchors.left: leftRow.right
+                        anchors.leftMargin: 6 * root.barWidgetScale
                         anchors.verticalCenter: parent.verticalCenter
                         height: 28
-                        transformOrigin: Item.Center
+                        transformOrigin: Item.Left
                         scale: root.barWidgetScale
                         spacing: 0
                         readonly property var mon: Hyprland.monitorFor(perScreen.modelData)
                         readonly property int activeId: mon && mon.activeWorkspace ? mon.activeWorkspace.id : (Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.id : -1)
+                        // [local] у каждого монитора свой десяток: DP-1 1–9, HDMI-A-1 11–19, eDP-1 21–29 (см. hyprland.lua).
+                        // Показываем только столы этого монитора, 1–5 всегда, номер — без десятка (21 → 1).
+                        readonly property int wsBase: !mon ? 0 : (mon.name === "eDP-1" ? 20 : (mon.name === "HDMI-A-1" ? 10 : 0))
+                        readonly property var monWsIds: {
+                            var out = [], b = wsRow.wsBase, all = root.wsIds;
+                            for (var i = 1; i <= 5; i++) out.push(b + i);
+                            for (var j = 0; j < all.length; j++) {
+                                var id = all[j];
+                                if (id > b && id <= b + 9 && out.indexOf(id) < 0) out.push(id);
+                            }
+                            if (wsRow.activeId > 0 && out.indexOf(wsRow.activeId) < 0) out.push(wsRow.activeId);
+                            out.sort(function (x, y) { return x - y; });
+                            return out;
+                        }
                         Repeater {
-                            model: root.wsIds
+                            model: wsRow.monWsIds
                             delegate: Item {
                                 id: wsi
                                 required property var modelData
@@ -5864,7 +5881,7 @@ Scope {
                                 }
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "" + wsi.modelData
+                                    text: "" + (wsi.modelData > 10 ? ((wsi.modelData - 1) % 10) + 1 : wsi.modelData)
                                     color: wsi.cur ? bpal.fg : (wsi.busy ? bpal.fg2 : bpal.fg3)
                                     font.family: root.fontForWeight((wsi.cur ? Font.DemiBold : Font.Normal), bpal.fam)
                                     font.pixelSize: 13
@@ -5883,6 +5900,36 @@ Scope {
                             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                             onWheel: event => root.hlWorkspace(event.angleDelta.y > 0 ? "e-1" : "e+1")
                         }
+                    }
+
+                    // ── [local] centre: clock ──
+                    Item {
+                        id: clockCenter
+                        visible: root.barWidgetEnabled("clock")
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.verticalCenter: parent.verticalCenter
+                        transformOrigin: Item.Center
+                        scale: root.barWidgetScale
+                        width: clockCenterText.implicitWidth + 16
+                        height: 28
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: parent.width - 2; height: parent.height - 6; radius: 6
+                            color: ui.pop === "cal" ? bpal.hover : (clockCenterMa.containsMouse ? bpal.hover : "transparent")
+                        }
+                        Text {
+                            id: clockCenterText
+                            anchors.centerIn: parent
+                            anchors.verticalCenterOffset: 0.5
+                            text: root.clockText
+                            color: bpal.fg
+                            font.family: root.fontForWeight(Font.DemiBold, bpal.fam)
+                            font.pixelSize: 14
+                            font.weight: Font.DemiBold
+                            renderType: Text.QtRendering
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        MouseArea { id: clockCenterMa; anchors.fill: parent; hoverEnabled: true; onClicked: ui.openPop("cal", 0) }
                     }
 
                     // ── right: tray, status items, control center, clock ──
@@ -6124,8 +6171,9 @@ Scope {
                         // clock
                         Item {
                             id: clockBtn
-                            visible: root.barWidgetEnabled("clock")
-                            width: root.barWidgetEnabled("clock") ? clockText.implicitWidth + 16 : 0
+                            // [local] часы переехали в центр бара (clockCenter)
+                            visible: false
+                            width: 0
                             height: 28
                             Rectangle {
                                 anchors.centerIn: parent

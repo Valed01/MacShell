@@ -13,6 +13,7 @@
 // togglePlaying() / nextTrack() / previousTrack().
 import QtQuick
 import QtQuick.Effects
+import Quickshell
 import "I18n.js" as I18n
 import "Fonts.js" as Fonts
 
@@ -53,6 +54,17 @@ Item {
     property bool lyricsSynced: false
     property bool lyricsOn: false            // the lyrics view is open
     signal lyricsToggled(bool on)
+
+    // ── radio mode (the Lofi Radio widget reuses this card) ──
+    //   the progress bar becomes a volume slider, shuffle = random station, back / forward = previous / next station,
+    //   the artwork and the card tint come from the station's accent colour
+    property bool radio: false
+    property color radioAccent: "#8E7CC3"
+    property real volume: 0.7                // 0..1
+    property bool buffering: false
+    property string stationTag: ""           // "2 / 5"
+    signal setVolume(real v)
+    signal randomStation()
 
     signal seek(real seconds)
     signal togglePlaying()
@@ -165,8 +177,10 @@ Item {
             w.tintKnown = true;
         }
     }
-    readonly property bool faceTint: tintKnown && !preview && hasPlayer
-    function tintFace(l, satMul) { return Qt.hsla(tintH, Math.min(0.7, tintS * satMul), l, 1); }
+    readonly property bool faceTint: (radio || tintKnown) && !preview && hasPlayer
+    readonly property real faceH: radio ? Math.max(0, radioAccent.hslHue) : tintH
+    readonly property real faceS: radio ? radioAccent.hslSaturation : tintS
+    function tintFace(l, satMul) { return Qt.hsla(faceH, Math.min(0.7, faceS * satMul), l, 1); }
 
     // ───────────────────────── background ─────────────────────────
     // Light face
@@ -365,7 +379,7 @@ Item {
     property bool seekHold: false
     property real seekFrac: 0
     readonly property bool seekShown: seeking || seekHold
-    readonly property real shownFrac: seekShown ? seekFrac : progress
+    readonly property real shownFrac: seekShown ? seekFrac : (radio ? volume : progress)
     readonly property real shownPos: seekShown ? seekFrac * length : position
     Timer { id: seekHoldTimer; interval: 900; onTriggered: w.seekHold = false }
     readonly property string shownTitle: hasPlayer ? (title !== "" ? title : I18n.tr("Unknown Title")) : I18n.tr("Not Playing")
@@ -401,6 +415,10 @@ Item {
             width: w.artS * w.k
             height: width
             r: (w.isLarge ? 22 : (w.isSmall ? 18 : 20)) * w.k
+            idleBgTop: w.radio ? Qt.hsla(w.faceH, Math.min(0.75, w.faceS), 0.58, 1) : "#3b3b40"
+            idleBgBottom: w.radio ? Qt.hsla((w.faceH + 0.08) % 1, Math.min(0.75, w.faceS), 0.34, 1) : "#27272b"
+            Behavior on idleBgTop { ColorAnimation { duration: 400 } }
+            Behavior on idleBgBottom { ColorAnimation { duration: 400 } }
             opacity: w.lyricsView ? 0 : 1
             visible: opacity > 0
             scale: w.lyricsView ? 0.9 : 1
@@ -410,6 +428,49 @@ Item {
             layer.enabled: opacity > 0 && opacity < 0.999
             layer.sourceRect: Qt.rect(-16, -16, width + 32, height + 32)
             layer.effect: MultiEffect { blurEnabled: true; blurMax: 32; blur: Math.min(1, (1 - artItem.opacity) * 0.9) }
+        }
+
+        // radio, small card: tap the artwork for the next station
+        MouseArea {
+            x: artItem.x; y: artItem.y; width: artItem.width; height: artItem.height
+            enabled: w.radio && w.isSmall && !w.preview && !w.editing
+            visible: enabled
+            cursorShape: Qt.PointingHandCursor
+            onClicked: w.nextTrack()
+        }
+
+        // radio: little equalizer bouncing in the corner while the stream plays
+        Row {
+            id: eq
+            visible: w.radio && !w.isSmall
+            x: (w.wr - w.mx - 30) * w.k
+            y: 24 * w.k
+            height: 22 * w.k
+            spacing: 3.5 * w.k
+            opacity: w.playing && !w.buffering ? 1 : 0.45
+            Behavior on opacity { NumberAnimation { duration: 300 } }
+            Repeater {
+                model: 4
+                Rectangle {
+                    id: eqBar
+                    required property int index
+                    readonly property bool live: w.playing && !w.buffering && !w.preview
+                    property real lvl: 0.25
+                    anchors.bottom: parent.bottom
+                    width: 4.5 * w.k
+                    height: Math.max(width, eq.height * lvl)
+                    radius: width / 2
+                    color: w.fgBtn
+                    SequentialAnimation on lvl {
+                        running: eqBar.live
+                        loops: Animation.Infinite
+                        onRunningChanged: if (!running) eqBar.lvl = 0.25
+                        NumberAnimation { to: [0.9, 0.6, 1.0, 0.7][eqBar.index]; duration: [380, 300, 450, 340][eqBar.index]; easing.type: Easing.InOutSine }
+                        NumberAnimation { to: [0.3, 0.95, 0.4, 0.85][eqBar.index]; duration: [420, 360, 310, 400][eqBar.index]; easing.type: Easing.InOutSine }
+                        NumberAnimation { to: [0.65, 0.35, 0.8, 0.3][eqBar.index]; duration: [330, 440, 380, 290][eqBar.index]; easing.type: Easing.InOutSine }
+                    }
+                }
+            }
         }
 
         // ── title ──
@@ -594,7 +655,7 @@ Item {
             radius: height / 2
             color: w.trackCol
             Rectangle {
-                width: w.hasPlayer && w.length > 0 ? Math.max(parent.height, parent.width * w.shownFrac) : 0
+                width: w.hasPlayer && (w.radio || w.length > 0) ? Math.max(parent.height, parent.width * w.shownFrac) : 0
                 height: parent.height
                 radius: height / 2
                 color: seekMa.pressed || seekMa.containsMouse ? w.fa(w.dark ? 0.78 : 0.66) : w.fillCol
@@ -608,15 +669,15 @@ Item {
                 hoverEnabled: true
                 preventStealing: true
                 cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                enabled: !w.preview && !w.editing && w.hasPlayer && w.canSeek && w.length > 0
+                enabled: !w.preview && !w.editing && w.hasPlayer && (w.radio || (w.canSeek && w.length > 0))
                 function frac(mx) { return Math.max(0, Math.min(1, mapToItem(bar, mx, 0).x / bar.width)); }
                 onPressed: mouse => { seekHoldTimer.stop(); w.seekHold = false; w.seekFrac = frac(mouse.x); w.seeking = true; }
-                onPositionChanged: mouse => { if (pressed) w.seekFrac = frac(mouse.x); }
+                onPositionChanged: mouse => { if (pressed) { w.seekFrac = frac(mouse.x); if (w.radio) w.setVolume(w.seekFrac); } }
                 onReleased: {
                     w.seeking = false;
                     w.seekHold = true;
                     seekHoldTimer.restart();
-                    w.seek(w.seekFrac * w.length);
+                    if (w.radio) w.setVolume(w.seekFrac); else w.seek(w.seekFrac * w.length);
                 }
                 onCanceled: w.seeking = false
             }
@@ -633,15 +694,16 @@ Item {
             y: w.timeCY * w.k - height / 2
             height: 18 * w.k
             verticalAlignment: Text.AlignVCenter
-            text: w.hasPlayer ? w.fmt(w.shownPos) : ""
-            color: w.fg2
+            text: w.radio ? (w.buffering ? I18n.tr("Connecting\u2026") : (w.playing ? "\u25CF " + I18n.tr("LIVE") : I18n.tr("Volume")))
+                          : (w.hasPlayer ? w.fmt(w.shownPos) : "")
+            color: w.radio && w.playing && !w.buffering ? "#FF5A50" : w.fg2
             font.family: w.fam
             font.pixelSize: 13 * w.k
             font.weight: Font.Medium
         }
         Text {
             id: timeR
-            visible: !w.isSmall && w.length > 0 && opacity > 0
+            visible: !w.isSmall && (w.radio || w.length > 0) && opacity > 0
             opacity: w.lyricsView ? 0 : 1
             Behavior on opacity { NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
             layer.enabled: opacity > 0 && opacity < 0.999
@@ -651,7 +713,7 @@ Item {
             y: w.timeCY * w.k - height / 2
             height: 18 * w.k
             verticalAlignment: Text.AlignVCenter
-            text: "\u2212" + w.fmt(Math.max(0, w.length - w.shownPos))
+            text: w.radio ? Math.round(w.shownFrac * 100) + "%" : "\u2212" + w.fmt(Math.max(0, w.length - w.shownPos))
             color: w.fg2
             font.family: w.fam
             font.pixelSize: 13 * w.k
@@ -667,12 +729,12 @@ Item {
             width: 44 * w.k
             height: width
             kind: "shuffle"
-            col: w.shuffle ? w.fgBtn : w.fgDim
+            col: (w.shuffle || w.radio) ? w.fgBtn : w.fgDim
             gw: 26 * w.k
             gh: 21 * w.k
-            on: w.shuffle
-            enabledBtn: w.canShuffle
-            onClicked: w.toggleShuffle()
+            on: w.shuffle && !w.radio
+            enabledBtn: w.radio || w.canShuffle
+            onClicked: { if (w.radio) w.randomStation(); else w.toggleShuffle(); }
         }
         PlayerBtn {
             visible: !w.isSmall
@@ -713,8 +775,22 @@ Item {
             gh: 25 * w.k
             onClicked: w.nextTrack()
         }
+        Text {   // radio: which station of how many
+            visible: w.radio && !w.isSmall
+            x: (w.wr - 25 - 44) * w.k
+            y: w.ctlCY * w.k - height / 2
+            width: 44 * w.k
+            height: 44 * w.k
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            text: w.stationTag
+            color: w.fgDim
+            font.family: Fonts.forWeight(Font.DemiBold, w.fam)
+            font.pixelSize: 14 * w.k
+            font.weight: Font.DemiBold
+        }
         PlayerBtn {
-            visible: !w.isSmall
+            visible: !w.isSmall && !w.radio
             wd: w
             x: (w.wr - 25 - 44) * w.k
             y: w.ctlCY * w.k - height / 2
@@ -732,7 +808,7 @@ Item {
 
         // ── lyrics button (top right corner) ──
         PlayerBtn {
-            visible: !w.isSmall
+            visible: !w.isSmall && !w.radio
             wd: w
             x: (w.wr - w.mx - 40) * w.k
             y: 18 * w.k
@@ -746,5 +822,15 @@ Item {
             idleFill: true
             onClicked: { w.lyricsOn = !w.lyricsOn; w.lyricsToggled(w.lyricsOn); }
         }
+    }
+
+    // [local] ничего не играет → клик по виджету открывает Яндекс Музыку
+    MouseArea {
+        anchors.fill: parent
+        z: 1000
+        enabled: !w.hasPlayer && !w.preview && !w.editing
+        visible: enabled
+        cursorShape: Qt.PointingHandCursor
+        onClicked: Quickshell.execDetached(["yandex-music"])
     }
 }

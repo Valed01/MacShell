@@ -167,6 +167,79 @@ Item {
             }
         }
         Component {
+            id: radioVisual
+            PlayerWidget {
+                radio: true
+                scaleF: host.widgetScale
+                style: wstyle
+                size: wsize
+                contentScale: host.playerScale
+                fam: host.fontFamily
+                screenX: v.sx; screenY: v.sy
+                readonly property var st: host.radioStation
+                hasPlayer: true
+                radioAccent: st.color
+                // playing with a song title: song on top, station below; otherwise the station name on top
+                title: host.radioOn && host.radioTrack !== "" ? host.radioTrack : st.name
+                artist: host.radioError !== "" ? host.radioError
+                      : (host.radioOn && host.radioTrack !== "" ? st.name : st.desc)
+                playing: host.radioOn
+                buffering: host.radioOn && host.radioBuffering
+                volume: host.radioVolume
+                stationTag: (host.radioIndex + 1) + "/" + host.radioStations.length
+                glassReady: host.glassState === "ready"
+                shaderUrl: "file://" + host.glassShaderOut
+                wallUrl: host.fileUrl(host.wallpaperFor(v.sname))
+                wallVideo: host.liveWallVideo
+                wallPaused: host.liveWallPaused
+                screenW: v.sw
+                screenH: v.sh
+                glassOpacity: host.glassOpacity
+                glassBlur: host.glassBlur
+                glassLiquid: host.glassLiquid
+                glassRim: host.glassRim
+                borderTint: host.borderTint
+                glassGrain: host.glassGrain
+                darkGlass: host.darkGlass
+                editing: host.editing
+                onTogglePlaying: host.radioToggle()
+                onNextTrack: host.radioStep(1)
+                onPreviousTrack: host.radioStep(-1)
+                onRandomStation: host.radioRandom()
+                onSetVolume: vol => host.radioSetVolume(vol)
+                onGlassFailed: host.glassState = "failed"
+            }
+        }
+        Component {
+            id: systemVisual
+            CardWidget {
+                scaleF: host.widgetScale
+                style: wstyle
+                size: wsize
+                mode: wmode
+                fam: host.fontFamily
+                screenX: v.sx; screenY: v.sy
+                content: sysContent
+                glassReady: host.glassState === "ready"
+                shaderUrl: "file://" + host.glassShaderOut
+                wallUrl: host.fileUrl(host.wallpaperFor(v.sname))
+                wallVideo: host.liveWallVideo
+                wallPaused: host.liveWallPaused
+                screenW: v.sw
+                screenH: v.sh
+                glassOpacity: host.glassOpacity
+                glassBlur: host.glassBlur
+                glassLiquid: host.glassLiquid
+                glassRim: host.glassRim
+                borderTint: host.borderTint
+                glassGrain: host.glassGrain
+                darkGlass: host.darkGlass
+                editing: host.editing
+                onGlassFailed: host.glassState = "failed"
+            }
+        }
+        Component { id: sysContent; SysContent { host: v.host } }
+        Component {
             id: imageVisual
             ImageWidget {
                 size: wsize
@@ -185,6 +258,8 @@ Item {
             sourceComponent: wtype === "calendar" ? calendarVisual
                            : (wtype === "clock" ? clockVisual
                            : (wtype === "player" ? playerVisual
-                           : (wtype === "image" ? imageVisual : weatherVisual)))
+                           : (wtype === "radio" ? radioVisual
+                           : (wtype === "system" ? systemVisual
+                           : (wtype === "image" ? imageVisual : weatherVisual)))))
         }
 }

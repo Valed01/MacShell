@@ -22,8 +22,17 @@ Item {
 
     focus: true
 
-    // ── entrance: start once the wallpaper is decoded (or after a short timeout), so it never fades in from black
-    Timer { id: showTimer; interval: 450; running: true; onTriggered: ls.shown = true }
+    // ── единая схема движения (вход / выход), общая с Splash ──
+    // вход: 600 мс OutCubic, выход: 420 мс InOutCubic. Обои НЕ масштабируются: под блокировкой (xray) лежат
+    // те же обои 1:1 (рабочий стол или заставка), поэтому кроссфейд незаметен; двигаются только часы и панели.
+    readonly property int durIn: 600
+    readonly property int durOut: 420
+    readonly property int easeIn: Easing.OutCubic
+    readonly property int easeOut: Easing.InOutCubic
+
+    // ── entrance: start once the wallpaper is decoded, so it never fades in from black / pops in late.
+    // 4K PNG декодируется дольше 450 мс — старый таймер запускал вход раньше, и обои «впрыгивали» посреди анимации.
+    Timer { id: showTimer; interval: 1500; running: true; onTriggered: ls.shown = true }
     Connections {
         target: wall
         function onStatusChanged() { if (wall.status === Image.Ready || wall.status === Image.Error) ls.shown = true; }
@@ -31,7 +40,7 @@ Item {
 
     // whole screen fades in over the (xray) desktop and back out on unlock
     opacity: shown && !leaving ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: ls.leaving ? 420 : 650; easing.type: Easing.OutQuint } }
+    Behavior on opacity { NumberAnimation { duration: ls.leaving ? ls.durOut : ls.durIn; easing.type: ls.leaving ? ls.easeOut : ls.easeIn } }
 
     // ═════════════ BACKDROP ═════════════
     Rectangle { anchors.fill: parent; color: "#0b0b10" }
@@ -49,9 +58,8 @@ Item {
             smooth: true
             // A 2.5K decode is plenty for a blurred full-screen background and avoids decoding huge 4K/8K originals.
             sourceSize.width: Math.max(1, Math.min(ls.width * 1.15, 2560))
-            // slow settle-in zoom, and a gentle zoom-out as the lock lifts
-            scale: ls.leaving ? 1.06 : (ls.shown ? 1.0 : 1.09)
-            Behavior on scale { NumberAnimation { duration: ls.leaving ? 520 : 650; easing.type: Easing.OutQuint } }
+            // без зума: увеличенная копия поверх обоев рабочего стола давала «двоение» и скачок картинки
+            scale: 1.0
         }
         // animated wallpaper: the same video MacShell plays on the desktop, muted and looping
         Loader {
@@ -194,7 +202,7 @@ Item {
         anchors.topMargin: 14 * ls.u; anchors.rightMargin: 22 * ls.u
         spacing: 12 * ls.u
         opacity: ls.shown && !ls.leaving ? 0.95 : 0
-        Behavior on opacity { NumberAnimation { duration: 650; easing.type: Easing.OutQuint } }
+        Behavior on opacity { NumberAnimation { duration: ls.leaving ? ls.durOut : ls.durIn; easing.type: ls.leaving ? ls.easeOut : ls.easeIn } }
 
         Glyph {
             anchors.verticalCenter: parent.verticalCenter
@@ -315,7 +323,7 @@ Item {
         // cards below a cleared one glide up into its place
         move: Transition { NumberAnimation { properties: "y"; duration: 420; easing.type: Easing.OutQuint } }
         opacity: ls.shown && !ls.leaving ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: 650; easing.type: Easing.OutQuint } }
+        Behavior on opacity { NumberAnimation { duration: ls.leaving ? ls.durOut : ls.durIn; easing.type: ls.leaving ? ls.easeOut : ls.easeIn } }
 
         // live activity
         Item {
@@ -509,8 +517,8 @@ Item {
         ]
         height: dateTxt.implicitHeight + timeItem.y - dateTxt.height + timeItem.height
         opacity: ls.shown && !ls.leaving ? 1 : 0
-        Behavior on y { NumberAnimation { duration: ls.leaving ? 420 : 650; easing.type: Easing.OutQuint } }
-        Behavior on opacity { NumberAnimation { duration: ls.leaving ? 300 : 650; easing.type: Easing.OutQuint } }
+        Behavior on y { NumberAnimation { duration: ls.leaving ? ls.durOut : ls.durIn; easing.type: ls.leaving ? ls.easeOut : ls.easeIn } }
+        Behavior on opacity { NumberAnimation { duration: ls.leaving ? ls.durOut : ls.durIn; easing.type: ls.leaving ? ls.easeOut : ls.easeIn } }
 
         MorphText {
             id: dateTxt
@@ -1389,8 +1397,8 @@ Item {
         y: ls.height - height - (ls.shown && !ls.leaving ? 78 : 30) * ls.u
         opacity: ls.shown && !ls.leaving ? 1 : 0
         spacing: 10 * ls.u
-        Behavior on y { NumberAnimation { duration: ls.leaving ? 380 : 650; easing.type: Easing.OutQuint } }
-        Behavior on opacity { NumberAnimation { duration: ls.leaving ? 260 : 650; easing.type: Easing.OutQuint } }
+        Behavior on y { NumberAnimation { duration: ls.leaving ? ls.durOut : ls.durIn; easing.type: ls.leaving ? ls.easeOut : ls.easeIn } }
+        Behavior on opacity { NumberAnimation { duration: ls.leaving ? ls.durOut : ls.durIn; easing.type: ls.leaving ? ls.easeOut : ls.easeIn } }
 
         // avatar
         Item {

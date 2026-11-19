@@ -17,6 +17,34 @@
   <sub>Quick showcase (OLD)</sub>
 </p>
 
+<h1 align="center">Мой райс</h1>
+
+<p align="center">
+  <img width="854" alt="Рабочий стол" src="screenshots/desktop.png" />
+</p>
+
+<p align="center">
+  <img width="380" alt="Виджет «Система»" src="screenshots/system-widget.png" />
+  &nbsp;
+  <img width="400" alt="Виджет Lofi-радио" src="screenshots/lofi-radio.png" />
+</p>
+
+Что добавлено поверх MacShell:
+
+- **Виджет «Система»** (`system`): кольца ЦП / памяти / GPU / диска с температурами, графики процессора и сети,
+  батарея, SSD, видеопамять, swap, аптайм. Малый / средний / большой размер, Liquid Glass или обычная карточка.
+  Данные — `MacShell/sysstats.py` (запускается только пока виджет стоит на столе). Двойной клик — Mission Center.
+- **Виджет Lofi-радио** (`radio`): та же карточка, что у плеера. Пять lofi-станций, ⏮ / ⏭ — станции,
+  🔀 — случайная, полоса — громкость, название трека из ICY-метаданных. Играет через `mpv`.
+  Свои станции: `"radio": { "stations": [{ "name", "desc", "url", "color" }] }` в `~/.config/macwidgets/settings.json`.
+  Управление: `qs -c MacShell ipc call radio toggle | next | prev | random | volume 0.5 | status`.
+- **Бар**: часы по центру, имя приложения слева, у каждого монитора свой десяток воркспейсов
+  (DP-1 1–9, HDMI-A-1 11–19, eDP-1 21–29).
+- **MacLock**: общая с заставкой схема анимации входа / выхода, без зума обоев.
+- **Splash** (`Splash/`): экран загрузки, пока поднимается MacShell — `qs -c Splash` в автозапуске.
+
+Оба виджета добавляются в настройках: **Widgets → Add a Widget**.
+
 <p align="center">
   <a href="#screenshots">Screenshots</a> ·
   <a href="#requirements">Requirements</a> ·

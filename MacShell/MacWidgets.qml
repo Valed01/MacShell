@@ -56,7 +56,7 @@ Scope {
     property int rev: 0                    // bumped on every change to the list, so Settings bindings can re-evaluate count()
 
     readonly property var styleNames: ({ liquid: "Liquid Glass", normal: "Normal", light: "Light", dark: "Dark" })
-    readonly property var typeNames: ({ weather: "Weather", calendar: "Calendar", clock: "Clock", player: "Player", image: "Image" })
+    readonly property var typeNames: ({ weather: "Weather", calendar: "Calendar", clock: "Clock", player: "Player", radio: "Lofi Radio", system: "System", image: "Image" })
     readonly property var sizeNames: ({ small: "Small", medium: "Medium", large: "Large" })
     function dims(size) {
         var b = size === "large" ? [375, 385] : (size === "medium" ? [395, 185] : [185, 185]);
@@ -314,7 +314,8 @@ Scope {
             var m = wmodel.get(i);
             list.push({ id: m.wid, type: m.wtype, style: m.wstyle, size: m.wsize, mode: m.wmode || "auto", src: m.wsrc || "", x: m.wx, y: m.wy });
         }
-        store.setText(JSON.stringify({ tempUnit: tempUnit, locMode: locMode, cityName: cityName, widgetScale: widgetScale, widgets: list }, null, 2));
+        store.setText(JSON.stringify({ tempUnit: tempUnit, locMode: locMode, cityName: cityName, widgetScale: widgetScale,
+                                    radio: { station: radioIndex, volume: radioVolume, stations: radioCustom }, widgets: list }, null, 2));
     }
     function applySettings(o) {
         if (!o || typeof o !== "object") return;
@@ -322,13 +323,18 @@ Scope {
         if (o.locMode === "auto" || o.locMode === "city") locMode = o.locMode;
         if (typeof o.cityName === "string") cityName = o.cityName;
         if (typeof o.widgetScale === "number" && isFinite(o.widgetScale)) widgetScale = Math.max(0.6, Math.min(1.5, o.widgetScale));
+        if (o.radio && typeof o.radio === "object") {
+            if (Array.isArray(o.radio.stations)) radioCustom = o.radio.stations.filter(function (x) { return x && typeof x.url === "string" && x.url !== ""; });
+            if (typeof o.radio.volume === "number" && isFinite(o.radio.volume)) radioVolume = Math.max(0, Math.min(1, o.radio.volume));
+            if (typeof o.radio.station === "number") radioIndex = Math.max(0, Math.min(radioStations.length - 1, Math.floor(o.radio.station)));
+        }
         if (Array.isArray(o.widgets)) {
             wmodel.clear();
             for (var i = 0; i < o.widgets.length; i++) {
                 var w = o.widgets[i];
-                if (!w || (w.type !== "weather" && w.type !== "calendar" && w.type !== "clock" && w.type !== "player" && w.type !== "image")) continue;
+                if (!w || (w.type !== "weather" && w.type !== "calendar" && w.type !== "clock" && w.type !== "player" && w.type !== "radio" && w.type !== "system" && w.type !== "image")) continue;
                 wmodel.append({ wid: String(w.id || ("w" + i)), wtype: w.type,
-                                wstyle: w.type === "image" ? "normal" : (w.type === "clock" || w.type === "player")
+                                wstyle: w.type === "image" ? "normal" : (w.type === "clock" || w.type === "player" || w.type === "radio")
                                     ? ((w.style === "light" || w.style === "dark") ? w.style : "liquid")
                                     : (w.style === "normal" ? "normal" : "liquid"),
                                 wsize: (w.size === "medium" || w.size === "large") ? w.size : "small",
@@ -377,13 +383,149 @@ Scope {
         var r = rev, out = [];
         for (var i = 0; i < wmodel.count; i++) {
             var m = wmodel.get(i);
-            if (m.wtype !== "player") continue;
+            if (m.wtype !== "player" && m.wtype !== "radio" && m.wtype !== "system") continue;
             var d = dims(m.wsize);
             out.push([m.wx, m.wy, d[0], d[1]]);
         }
         return out;
     }
     function pr(i, k) { var r = playerRects[i]; return r ? r[k] : 0; }
+
+    // ───────────── System monitor (sysstats.py: one JSON line a second, only while a System widget is placed) ─────────────
+    property var sysData: ({})
+    property var sysCpuHist: []
+    property var sysDownHist: []
+    property var sysUpHist: []
+    readonly property int sysHistLen: 60
+    readonly property bool sysPlaced: ready && rev >= 0 && count("system") > 0
+    function sysPush(arr, v) { var a = arr.slice(); a.push(v); while (a.length < sysHistLen) a.unshift(0); if (a.length > sysHistLen) a.shift(); return a; }
+    Process {
+        id: sysProc
+        running: root.sysPlaced
+        command: ["python3", "-u", Quickshell.shellDir + "/sysstats.py"]
+        stdout: SplitParser {
+            onRead: data => {
+                try {
+                    var o = JSON.parse(data);
+                    root.sysData = o;
+                    root.sysCpuHist = root.sysPush(root.sysCpuHist, o.cpu);
+                    root.sysDownHist = root.sysPush(root.sysDownHist, o.down);
+                    root.sysUpHist = root.sysPush(root.sysUpHist, o.up);
+                } catch (err) { }
+            }
+        }
+        onExited: if (root.sysPlaced) sysRestart.restart()
+    }
+    Timer { id: sysRestart; interval: 3000; onTriggered: if (root.sysPlaced && !sysProc.running) sysProc.running = true }
+
+    // ───────────── Lofi Radio (mpv, no video, no user config / scripts) ─────────────
+    // Own stations: add  "radio": { "stations": [ { "name": "...", "desc": "...", "url": "...", "color": "#rrggbb" } ] }
+    // to ~/.config/macwidgets/settings.json — they replace the built-in list.
+    readonly property var radioDefaults: [
+        { name: "Lofi Hip Hop",     desc: "laut.fm \u00B7 lofi",                url: "https://lofi.stream.laut.fm/lofi",              color: "#9B7BD8" },
+        { name: "Chillhop Beats",   desc: "Zeno \u00B7 lofi hip hop",           url: "https://stream.zeno.fm/0r0xa792kwzuv",          color: "#E0896A" },
+        { name: "Record Lo-Fi",     desc: "\u0420\u0430\u0434\u0438\u043E Record \u00B7 Lo-Fi", url: "https://radiorecord.hostingradio.ru/lofi96.aacp", color: "#5E9BD6" },
+        { name: "SomaFM Fluid",     desc: "Instrumental hip hop \u00B7 liquid", url: "https://ice2.somafm.com/fluid-128-mp3",         color: "#4FB3A0" },
+        { name: "Nightwave Plaza",  desc: "Vaporwave \u00B7 chill",             url: "https://radio.plaza.one/mp3",                   color: "#D46FA8" }
+    ]
+    property var radioCustom: []
+    readonly property var radioStations: radioCustom.length > 0 ? radioCustom : radioDefaults
+    property int radioIndex: 0
+    readonly property var radioStation: {
+        var s = radioStations[Math.max(0, Math.min(radioStations.length - 1, radioIndex))] || radioDefaults[0];
+        return { name: s.name || "Radio", desc: s.desc || "Lofi Radio", url: s.url, color: s.color || "#9B7BD8" };
+    }
+    property real radioVolume: 0.7
+    property bool radioOn: false             // the user pressed play
+    property bool radioBuffering: false
+    property string radioTrack: ""           // ICY title of the song playing now
+    property string radioError: ""
+    property int radioFails: 0
+    readonly property bool radioPlaced: rev >= 0 && count("radio") > 0
+    readonly property string radioSock: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/macshell-radio.sock"
+    onRadioPlacedChanged: if (!radioPlaced) radioStop()
+    onRadioIndexChanged: { radioTrack = ""; scheduleSave(); }
+
+    function radioToggle() { if (radioOn) radioStop(); else radioStart(); }
+    function radioStart() {
+        radioOn = true; radioError = ""; radioFails = 0;
+        radioRestart();
+    }
+    function radioStop() {
+        radioOn = false; radioBuffering = false; radioTrack = ""; radioError = "";
+        radioRetry.stop(); radioRelaunch.stop();
+        radioSockConn.connected = false;
+        radioProc.running = false;
+    }
+    function radioRestart() {
+        radioRetry.stop();
+        radioSockConn.connected = false;
+        radioTrack = ""; radioBuffering = true;
+        radioProc.running = false;
+        radioRelaunch.restart();                 // let the old mpv exit, then start the new one
+    }
+    function radioStep(d) {
+        var n = radioStations.length;
+        radioIndex = ((radioIndex + d) % n + n) % n;
+        radioError = "";
+        if (radioOn) { radioFails = 0; radioRestart(); }
+    }
+    function radioRandom() {
+        var n = radioStations.length;
+        if (n < 2) return;
+        var i = radioIndex;
+        while (i === radioIndex) i = Math.floor(Math.random() * n);
+        radioStep(i - radioIndex);
+        if (!radioOn) radioStart();
+    }
+    function radioSetVolume(v) {
+        radioVolume = Math.round(Math.max(0, Math.min(1, v)) * 100) / 100;
+        scheduleSave();
+        radioSendVolume();
+    }
+    function radioSendVolume() {
+        if (!radioProc.running) return;
+        if (!radioSockConn.connected) { radioSockConn.connected = true; return; }   // sent once it connects
+        radioSockConn.write(JSON.stringify({ command: ["set_property", "volume", Math.round(radioVolume * 100)] }) + "\n");
+        radioSockConn.flush();
+    }
+    function radioLine(line) {
+        var m = /^\s*icy-title:\s*(.*)$/.exec(line);
+        if (m) {
+            var t = m[1].trim();
+            radioTrack = (t === "-" || /^\s*-\s*$/.test(t)) ? "" : t;
+            radioBuffering = false;
+            return;
+        }
+        if (/^\s*(\u25CF |\(\+\) )?Audio\b/.test(line) || /^AO: /.test(line)) { radioBuffering = false; radioFails = 0; radioError = ""; }
+    }
+    Timer { id: radioRelaunch; interval: 150; onTriggered: if (root.radioOn) radioProc.running = true }
+    Timer { id: radioRetry; interval: 4000; onTriggered: if (root.radioOn) root.radioRestart() }
+    Process {
+        id: radioProc
+        command: ["mpv", "--no-config", "--load-scripts=no", "--no-video", "--idle=no",
+                  "--term-status-msg=", "--display-tags=icy-title",
+                  "--cache=yes", "--demuxer-max-bytes=4MiB",
+                  "--volume=" + Math.round(root.radioVolume * 100),
+                  "--input-ipc-server=" + root.radioSock,
+                  "--title=MacShell Lofi Radio",
+                  root.radioStation.url]
+        stdout: SplitParser { onRead: data => root.radioLine(data) }
+        stderr: SplitParser { onRead: data => root.radioLine(data) }
+        onExited: (code, status) => {
+            radioSockConn.connected = false;
+            if (!root.radioOn || radioRelaunch.running) return;
+            // the stream dropped / failed: try again a few times, then give up
+            root.radioFails++;
+            if (root.radioFails <= 3) { root.radioError = I18n.tr("Reconnecting\u2026"); root.radioBuffering = true; radioRetry.restart(); }
+            else { root.radioOn = false; root.radioBuffering = false; root.radioError = I18n.tr("Station unavailable"); }
+        }
+    }
+    Socket {
+        id: radioSockConn
+        path: root.radioSock
+        onConnectedChanged: if (connected) root.radioSendVolume()
+    }
 
     // ───────────── lyrics (LRCLIB synced first; Genius plain-text fallback) ─────────────
     property bool lyricsWanted: false
@@ -884,5 +1026,19 @@ Scope {
         target: "widgets"
         function refresh(): void { root.refresh(); }
         function edit(on: bool): void { root.editing = on; }
+        function sysStatus(): string { return JSON.stringify({ placed: root.sysPlaced, running: sysProc.running, ready: root.ready, n: root.count("system"), cpu: root.sysData.cpu }); }
+    }
+    //   qs -c MacShell ipc call radio toggle | next | prev | random | volume 0.5 | status
+    IpcHandler {
+        target: "radio"
+        function toggle(): void { root.radioToggle(); }
+        function next(): void { root.radioStep(1); }
+        function prev(): void { root.radioStep(-1); }
+        function random(): void { root.radioRandom(); }
+        function volume(v: real): void { root.radioSetVolume(v); }
+        function status(): string {
+            return JSON.stringify({ on: root.radioOn, buffering: root.radioBuffering, station: root.radioStation.name,
+                                    track: root.radioTrack, volume: root.radioVolume, error: root.radioError });
+        }
     }
 }
